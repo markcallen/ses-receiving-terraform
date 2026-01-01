@@ -35,7 +35,7 @@ This Terraform configuration stands up an AWS SES inbound email pipeline: incomi
    ```bash
    terraform output dns_records_summary
    ```
-   
+
    This will display all DNS records you need to create in your DNS provider. You must add:
    - **1 MX record** - Directs incoming email to AWS SES
    - **1 TXT record** - Verifies domain ownership with SES
@@ -50,19 +50,19 @@ This Terraform configuration stands up an AWS SES inbound email pipeline: incomi
    ```bash
    aws ses get-identity-verification-attributes --identities $(terraform output -raw subdomain_fqdn)
    ```
-   
+
    Wait until the verification status shows `"Success"`. This usually takes a few minutes after DNS propagation.
 
 7. **Verify the SES receipt rule set is active** (automatically activated by Terraform):
    ```bash
    aws ses describe-active-receipt-rule-set
    ```
-   
+
    The active rule set name should match:
    ```bash
    terraform output -raw ses_receipt_rule_set_name
    ```
-   
+
    If you need to manually activate it (e.g., after deactivation):
    ```bash
    aws ses set-active-receipt-rule-set --rule-set-name $(terraform output -raw ses_receipt_rule_set_name)
@@ -83,7 +83,7 @@ After deployment and DNS propagation, verify the email pipeline is working:
    ```bash
    # Using the mail command (macOS/Linux)
    echo "This is a test message" | mail -s "Test Subject" test@$SUBDOMAIN
-   
+
    # Or use any email client to send to test@$SUBDOMAIN
    ```
 
@@ -91,7 +91,7 @@ After deployment and DNS propagation, verify the email pipeline is working:
    ```bash
    # View all objects in the bucket
    aws s3 ls s3://$BUCKET/ --recursive
-   
+
    # Expected output shows files organized by recipient:
    # 2026-01-01 12:34:56    1234 test@yourdomain.com/abc123def456.eml
    ```
@@ -100,7 +100,7 @@ After deployment and DNS propagation, verify the email pipeline is working:
    ```bash
    # Copy the email file to your local machine (replace MESSAGE_ID with actual value from step 3)
    aws s3 cp s3://$BUCKET/test@$SUBDOMAIN/MESSAGE_ID.eml ./test-email.eml
-   
+
    # View the raw email content
    cat ./test-email.eml
    ```
@@ -146,6 +146,121 @@ environment    = "dev"
 ## Lambda Behavior
 
 The Lambda at `lambda/handler.py` copies each raw message from the `incoming/` prefix into a folder named after each recipient (`recipient@example.com/messageId.eml`) and deletes the original object. This keeps the bucket tidy while preserving message data per mailbox.
+
+## Development
+
+### Prerequisites
+
+- [Terraform](https://www.terraform.io/downloads) >= 1.6.0
+- [TFLint](https://github.com/terraform-linters/tflint) for Terraform linting
+- [pre-commit](https://pre-commit.com/) for automated code quality checks
+- AWS CLI configured with appropriate credentials
+- Python 3.12 (for Lambda development)
+
+### Setting Up Pre-Commit Hooks
+
+This project uses pre-commit hooks to automatically check code quality before commits. The hooks run:
+- General file checks (JSON, YAML validation, trailing whitespace, large files, private keys)
+- Terraform formatting (`terraform fmt`)
+- Terraform validation (`terraform validate`)
+- TFLint checks (`terraform_tflint`)
+
+1. **Install pre-commit** (if not already installed):
+   ```bash
+   # macOS
+   brew install pre-commit
+
+   # Linux/WSL
+   pip install pre-commit
+
+   # Windows
+   pip install pre-commit
+   ```
+
+2. **Install the git hooks** in your local repository:
+   ```bash
+   pre-commit install
+   ```
+
+3. **Run hooks manually** on all files (optional, but recommended for first-time setup):
+   ```bash
+   pre-commit run --all-files
+   ```
+
+Once installed, the hooks will automatically run on `git commit`. If any hook fails, the commit will be blocked until you fix the issues.
+
+**Manual execution:**
+```bash
+# Run on all files
+pre-commit run --all-files
+
+# Run on staged files only
+pre-commit run
+
+# Run a specific hook
+pre-commit run terraform_fmt
+```
+
+### Setting Up TFLint
+
+TFLint helps catch errors and enforce best practices in your Terraform code.
+
+1. **Install TFLint** (if not already installed):
+   ```bash
+   # macOS
+   brew install tflint
+
+   # Linux
+   curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+   # Windows
+   choco install tflint
+   ```
+
+2. **Initialize TFLint** (downloads required plugins):
+   ```bash
+   tflint --init
+   ```
+
+**Note:** TFLint is automatically run by pre-commit hooks if you've set them up (see above).
+
+### Development Workflow
+
+When modifying Terraform configuration files:
+
+1. **Make your changes** to `.tf` files
+2. **Format the code**:
+   ```bash
+   terraform fmt
+   ```
+3. **Run TFLint** to check for errors and best practices:
+   ```bash
+   tflint
+   ```
+4. **Validate the configuration**:
+   ```bash
+   terraform validate
+   ```
+5. **Review the execution plan**:
+   ```bash
+   terraform plan
+   ```
+6. **Apply changes** (if plan looks correct):
+   ```bash
+   terraform apply
+   ```
+
+**Important:** Always run `tflint` after modifying any `.tf` file before committing or applying changes.
+
+### Modifying the Lambda Function
+
+1. Edit `lambda/handler.py`
+2. Test your changes locally if possible
+3. Run `terraform apply` to deploy (automatically packages and uploads the Lambda)
+4. Monitor logs for errors:
+   ```bash
+   aws logs tail /aws/lambda/$(terraform output -raw lambda_function_name) --follow
+   ```
 
 ## Cleanup
 

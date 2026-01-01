@@ -47,6 +47,32 @@ terraform output
 
 # Show specific output
 terraform output mx_record
+
+# Run tflint to check for errors and best practices
+tflint
+
+# Initialize tflint (download plugins)
+tflint --init
+```
+
+### TFLint
+
+TFLint is a Terraform linter that checks for errors, best practices, and potential issues.
+
+**Important:** Always run `tflint` after modifying any `.tf` file before committing or applying changes.
+
+```bash
+# Initialize tflint (required first time and after config changes)
+tflint --init
+
+# Run tflint on current directory
+tflint
+
+# Run with specific format
+tflint --format compact
+
+# Run recursively on all modules
+tflint --recursive
 ```
 
 ### Lambda Testing
@@ -95,6 +121,7 @@ aws sqs receive-message --queue-url <queue-url>
 **Formatting:**
 
 - Use `terraform fmt` before committing (2-space indentation)
+- Run `tflint` after modifying any `.tf` file to check for errors and best practices
 - One resource per block
 - Blank line between resources
 - Use snake_case for resource names and variables
@@ -166,8 +193,9 @@ aws sqs receive-message --queue-url <queue-url>
 2. Add any required IAM permissions
 3. Tag with `{ Project = var.project_tag }`
 4. Run `terraform fmt` and `terraform validate`
-5. Run `terraform plan` to review changes
-6. Add output to `outputs.tf` if resource info needs to be exposed
+5. Run `tflint` to check for errors and best practices
+6. Run `terraform plan` to review changes
+7. Add output to `outputs.tf` if resource info needs to be exposed
 
 ### Modifying Lambda Function
 

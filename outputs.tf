@@ -54,19 +54,19 @@ output "ses_dkim_tokens" {
 output "dns_records_summary" {
   description = "All DNS records needed for SES"
   value       = <<-EOT
-    
+
     DNS Records Required:
-    
+
     1. MX Record (for receiving email):
        Type: MX
        Name: ${var.subdomain_fqdn}
        Value: 10 inbound-smtp.${var.region}.amazonaws.com
-    
+
     2. TXT Record (for domain verification):
        Type: TXT
        Name: _amazonses.${var.subdomain_fqdn}
        Value: ${aws_ses_domain_identity.main.verification_token}
-    
+
     3. DKIM CNAME Records (for email authentication - 3 records):
        ${join("\n       ", [for token in aws_ses_domain_dkim.main.dkim_tokens : "CNAME: ${token}._domainkey.${var.subdomain_fqdn} -> ${token}.dkim.amazonses.com"])}
   EOT
