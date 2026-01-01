@@ -214,8 +214,8 @@ graph TB
     style SQS fill:#ff9900
     style DLQ fill:#ff6b6b
     style CWLogs fill:#ff9900
-    style SESRole fill:#dd344c
-    style LambdaRole fill:#dd344c
+    style SESRole fill:#e1f5ff
+    style LambdaRole fill:#e1f5ff
 ```
 
 ### Data Flow
