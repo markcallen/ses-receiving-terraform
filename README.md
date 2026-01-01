@@ -153,93 +153,69 @@ This section provides a detailed view of the AWS SES inbound email pipeline arch
 
 ### Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Inbound Email Pipeline                            │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Internet
+        Email[Email Sender]
+    end
 
-  Internet                    AWS Cloud (Region: var.region)
-     │
-     │  1. MX Record lookup
-     │     (DNS: subdomain_fqdn)
-     ▼
-┌──────────────────┐
-│   AWS SES        │
-│  Mail Receiver   │──────────────────────┐
-└────────┬─────────┘                      │
-         │                                │
-         │ 2. SES Receipt Rule            │ 3. SES Invoke Lambda
-         │    (scan_enabled: true)        │    (position: 2)
-         │    (tls_policy: Optional)      │
-         │                                │
-         │ S3 Action (position: 1)        │
-         │                                │
-         ▼                                ▼
-┌─────────────────────────────┐   ┌──────────────────────────┐
-│  S3 Bucket (encrypted)      │   │  Lambda Function         │
-│  - Name: bucket_name        │   │  - Runtime: Python 3.12  │
-│  - Versioning: Enabled      │   │  - Timeout: 30s          │
-│  - Public Access: Blocked   │   │  - Handler: handler.py   │
-│                             │   │                          │
-│  Structure:                 │   │  Environment Variables:  │
-│  ├─ incoming/               │◄──┤  - BUCKET                │
-│  │  └─ {messageId}.eml     │   │  - PREFIX: incoming/     │
-│  │     (original email)     │   │                          │
-│  │                          │   │  IAM Permissions:        │
-│  └─ {recipient}/            │   │  - s3:GetObject          │
-│     └─ {messageId}.eml     │   │  - s3:PutObject          │
-│        (organized by user)  │   │  - s3:DeleteObject       │
-│                             │   │  - s3:CopyObject         │
-└──────────┬──────────────────┘   │  - logs:CreateLogGroup   │
-           │                      │  - logs:CreateLogStream  │
-           │                      │  - logs:PutLogEvents     │
-           │ 4. S3 Event          └──────────┬───────────────┘
-           │    (ObjectCreated)              │
-           ▼                                 │ Logs
-  ┌──────────────────┐                       ▼
-  │   SNS Topic      │              ┌──────────────────────┐
-  │  - Name: topic   │              │  CloudWatch Logs     │
-  │                  │              │  - Retention: 14 days│
-  └────────┬─────────┘              │  - Group: /aws/...   │
-           │                        └──────────────────────┘
-           │ 5. Fan-out notification
-           │
-           ▼
-  ┌──────────────────┐
-  │   SQS Queue      │
-  │  - Name: queue   │
-  │  - Retention:    │
-  │    14 days       │
-  │  - Visibility:   │
-  │    60 seconds    │
-  └────────┬─────────┘
-           │
-           │ 6. Failed messages
-           │    (maxReceiveCount: 5)
-           ▼
-  ┌──────────────────┐
-  │   SQS DLQ        │
-  │  - Name: dlq     │
-  │  - Retention:    │
-  │    14 days       │
-  └──────────────────┘
+    subgraph AWS["AWS Cloud (Region: var.region)"]
+        subgraph DNS["DNS Configuration"]
+            MX[MX Record<br/>subdomain_fqdn]
+            TXT[TXT Record<br/>Domain Verification]
+            DKIM[DKIM CNAME Records<br/>Email Authentication]
+        end
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          IAM Roles & Permissions                            │
-└─────────────────────────────────────────────────────────────────────────────┘
+        SES[AWS SES Mail Receiver<br/>scan_enabled: true<br/>tls_policy: Optional]
 
-┌──────────────────────┐       ┌──────────────────────┐
-│  SES S3 Role         │       │  Lambda Execution    │
-│                      │       │  Role                │
-│  Permissions:        │       │                      │
-│  - s3:PutObject      │       │  Permissions:        │
-│  - sns:Publish       │       │  - s3:Get/Put/Delete │
-│                      │       │  - s3:CopyObject     │
-│  Used by:            │       │  - logs:*            │
-│  - SES Receipt Rule  │       │                      │
-└──────────────────────┘       │  Used by:            │
-                               │  - Lambda Function   │
-                               └──────────────────────┘
+        subgraph S3Bucket["S3 Bucket (Encrypted)"]
+            S3Meta[Name: bucket_name<br/>Versioning: Enabled<br/>Public Access: Blocked<br/>Encryption: AES256]
+            Incoming[incoming/<br/>{messageId}.eml]
+            Recipient[{recipient}/<br/>{messageId}.eml]
+        end
+
+        subgraph Lambda["Lambda Function"]
+            LambdaMeta[Runtime: Python 3.12<br/>Timeout: 30s<br/>Handler: handler.py]
+            LambdaEnv[Environment:<br/>BUCKET<br/>PREFIX: incoming/]
+            LambdaIAM[IAM Permissions:<br/>s3:GetObject<br/>s3:PutObject<br/>s3:DeleteObject<br/>s3:CopyObject<br/>logs:*]
+        end
+
+        CWLogs[CloudWatch Logs<br/>Retention: 14 days<br/>Group: /aws/lambda/...]
+
+        SNS[SNS Topic<br/>Name: topic]
+        SQS[SQS Queue<br/>Name: queue<br/>Retention: 14 days<br/>Visibility: 60s]
+        DLQ[SQS DLQ<br/>Name: dlq<br/>Retention: 14 days<br/>maxReceiveCount: 5]
+
+        subgraph IAM["IAM Roles"]
+            SESRole[SES S3 Role<br/>s3:PutObject<br/>sns:Publish]
+            LambdaRole[Lambda Execution Role<br/>s3:Get/Put/Delete<br/>s3:CopyObject<br/>logs:*]
+        end
+    end
+
+    Email -->|1. MX Record Lookup| MX
+    MX -->|Routes to| SES
+    SES -->|2. S3 Action<br/>Position: 1| Incoming
+    SES -->|3. Lambda Action<br/>Position: 2| Lambda
+    Lambda -->|Copies| Recipient
+    Lambda -->|Deletes original| Incoming
+    Lambda -->|Logs| CWLogs
+    Incoming -->|4. S3 Event<br/>ObjectCreated| SNS
+    SNS -->|5. Fan-out<br/>notification| SQS
+    SQS -->|6. Failed messages<br/>after 5 retries| DLQ
+
+    SESRole -.->|Used by| SES
+    LambdaRole -.->|Used by| Lambda
+
+    style Email fill:#e1f5ff
+    style SES fill:#ff9900
+    style S3Bucket fill:#569a31
+    style Lambda fill:#ff9900
+    style SNS fill:#ff9900
+    style SQS fill:#ff9900
+    style DLQ fill:#ff6b6b
+    style CWLogs fill:#ff9900
+    style SESRole fill:#dd344c
+    style LambdaRole fill:#dd344c
 ```
 
 ### Data Flow
