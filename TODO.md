@@ -53,9 +53,9 @@ This document tracks future improvements and enhancements for the SES Receiving 
   - CloudWatch log group path
   - Rule set activation command
 
-- [ ] **Add Tags to IAM Roles and Policies**
-  - Currently only some resources have the Project tag
-  - Add `tags = { Project = var.project_tag }` to all IAM roles
+- [x] **Add Tags to IAM Roles and Policies**
+  - All IAM roles now have the Project and Environment tags via local.common_tags
+  - Note: Inline IAM policies (aws_iam_role_policy) don't support tags in AWS
 
 ## Medium Priority
 
