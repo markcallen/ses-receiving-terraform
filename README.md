@@ -170,8 +170,8 @@ graph TB
 
         subgraph S3Bucket["S3 Bucket (Encrypted)"]
             S3Meta[Name: bucket_name<br/>Versioning: Enabled<br/>Public Access: Blocked<br/>Encryption: AES256]
-            Incoming[incoming/<br/>{messageId}.eml]
-            Recipient[{recipient}/<br/>{messageId}.eml]
+            Incoming["incoming/<br/>messageId.eml"]
+            Recipient["recipient@domain/<br/>messageId.eml"]
         end
 
         subgraph Lambda["Lambda Function"]
