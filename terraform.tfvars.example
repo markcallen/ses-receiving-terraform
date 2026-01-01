@@ -1,0 +1,25 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is git-ignored and will not be committed
+
+# AWS region that supports SES receiving
+# Supported regions: us-east-1, us-east-2, us-west-2, eu-west-1
+region = "us-east-2"
+
+# The subdomain that will receive emails (e.g., mail.example.com)
+# You will need to add an MX record for this subdomain pointing to SES
+subdomain_fqdn = "mail.example.com"
+
+# S3 bucket name - must be globally unique across all AWS accounts
+# Use lowercase, numbers, and hyphens only
+bucket_name = "ses-inbound-example-com"
+
+# Project tag used as prefix for all resource names
+# Keep it short and descriptive
+project_tag = "ses-receive-example"
+
+# Project name for resource labeling
+project = "ses-inbound"
+
+# Environment name
+environment = "production"
