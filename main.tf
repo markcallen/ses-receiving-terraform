@@ -235,6 +235,12 @@ resource "aws_iam_role_policy" "lambda_s3_rw" {
   })
 }
 
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/${var.project_tag}-move"
+  retention_in_days = var.log_retention_days
+  tags              = local.common_tags
+}
+
 resource "aws_lambda_function" "move_to_recipient_folder" {
   function_name    = "${var.project_tag}-move"
   role             = aws_iam_role.lambda_role.arn
@@ -249,7 +255,8 @@ resource "aws_lambda_function" "move_to_recipient_folder" {
       PREFIX = "incoming/"
     }
   }
-  tags = local.common_tags
+  tags       = local.common_tags
+  depends_on = [aws_cloudwatch_log_group.lambda_logs]
 }
 
 resource "aws_lambda_permission" "allow_ses" {

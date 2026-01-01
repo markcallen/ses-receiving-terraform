@@ -71,3 +71,13 @@ output "dns_records_summary" {
        ${join("\n       ", [for token in aws_ses_domain_dkim.main.dkim_tokens : "CNAME: ${token}._domainkey.${var.subdomain_fqdn} -> ${token}.dkim.amazonses.com"])}
   EOT
 }
+
+output "cloudwatch_log_group_name" {
+  description = "CloudWatch Logs group name for Lambda function (use with 'aws logs tail')"
+  value       = aws_cloudwatch_log_group.lambda_logs.name
+}
+
+output "rule_set_activation_command" {
+  description = "AWS CLI command to manually activate the SES receipt rule set if needed"
+  value       = "aws ses set-active-receipt-rule-set --rule-set-name ${aws_ses_receipt_rule_set.main.rule_set_name}"
+}

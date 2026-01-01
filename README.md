@@ -147,6 +147,162 @@ environment    = "dev"
 
 The Lambda at `lambda/handler.py` copies each raw message from the `incoming/` prefix into a folder named after each recipient (`recipient@example.com/messageId.eml`) and deletes the original object. This keeps the bucket tidy while preserving message data per mailbox.
 
+## Architecture
+
+This section provides a detailed view of the AWS SES inbound email pipeline architecture and data flow.
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Inbound Email Pipeline                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  Internet                    AWS Cloud (Region: var.region)
+     │
+     │  1. MX Record lookup
+     │     (DNS: subdomain_fqdn)
+     ▼
+┌──────────────────┐
+│   AWS SES        │
+│  Mail Receiver   │──────────────────────┐
+└────────┬─────────┘                      │
+         │                                │
+         │ 2. SES Receipt Rule            │ 3. SES Invoke Lambda
+         │    (scan_enabled: true)        │    (position: 2)
+         │    (tls_policy: Optional)      │
+         │                                │
+         │ S3 Action (position: 1)        │
+         │                                │
+         ▼                                ▼
+┌─────────────────────────────┐   ┌──────────────────────────┐
+│  S3 Bucket (encrypted)      │   │  Lambda Function         │
+│  - Name: bucket_name        │   │  - Runtime: Python 3.12  │
+│  - Versioning: Enabled      │   │  - Timeout: 30s          │
+│  - Public Access: Blocked   │   │  - Handler: handler.py   │
+│                             │   │                          │
+│  Structure:                 │   │  Environment Variables:  │
+│  ├─ incoming/               │◄──┤  - BUCKET                │
+│  │  └─ {messageId}.eml     │   │  - PREFIX: incoming/     │
+│  │     (original email)     │   │                          │
+│  │                          │   │  IAM Permissions:        │
+│  └─ {recipient}/            │   │  - s3:GetObject          │
+│     └─ {messageId}.eml     │   │  - s3:PutObject          │
+│        (organized by user)  │   │  - s3:DeleteObject       │
+│                             │   │  - s3:CopyObject         │
+└──────────┬──────────────────┘   │  - logs:CreateLogGroup   │
+           │                      │  - logs:CreateLogStream  │
+           │                      │  - logs:PutLogEvents     │
+           │ 4. S3 Event          └──────────┬───────────────┘
+           │    (ObjectCreated)              │
+           ▼                                 │ Logs
+  ┌──────────────────┐                       ▼
+  │   SNS Topic      │              ┌──────────────────────┐
+  │  - Name: topic   │              │  CloudWatch Logs     │
+  │                  │              │  - Retention: 14 days│
+  └────────┬─────────┘              │  - Group: /aws/...   │
+           │                        └──────────────────────┘
+           │ 5. Fan-out notification
+           │
+           ▼
+  ┌──────────────────┐
+  │   SQS Queue      │
+  │  - Name: queue   │
+  │  - Retention:    │
+  │    14 days       │
+  │  - Visibility:   │
+  │    60 seconds    │
+  └────────┬─────────┘
+           │
+           │ 6. Failed messages
+           │    (maxReceiveCount: 5)
+           ▼
+  ┌──────────────────┐
+  │   SQS DLQ        │
+  │  - Name: dlq     │
+  │  - Retention:    │
+  │    14 days       │
+  └──────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          IAM Roles & Permissions                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────┐       ┌──────────────────────┐
+│  SES S3 Role         │       │  Lambda Execution    │
+│                      │       │  Role                │
+│  Permissions:        │       │                      │
+│  - s3:PutObject      │       │  Permissions:        │
+│  - sns:Publish       │       │  - s3:Get/Put/Delete │
+│                      │       │  - s3:CopyObject     │
+│  Used by:            │       │  - logs:*            │
+│  - SES Receipt Rule  │       │                      │
+└──────────────────────┘       │  Used by:            │
+                               │  - Lambda Function   │
+                               └──────────────────────┘
+```
+
+### Data Flow
+
+1. **Email Arrival**
+   - External email sent to `<user>@<subdomain_fqdn>`
+   - DNS MX record routes to AWS SES (`inbound-smtp.<region>.amazonaws.com`)
+   - SES receives email and verifies domain ownership via TXT record
+
+2. **SES Receipt Rule Processing** (Rule: `${project_tag}-rule`)
+   - **Position 1 - S3 Action**: Stores raw email as `.eml` file in `s3://<bucket>/incoming/<messageId>`
+   - SES publishes notification to SNS topic
+   - **Position 2 - Lambda Action**: Invokes Lambda function with SES event payload
+
+3. **Lambda Processing** (`move_to_recipient_folder`)
+   - Receives SES event with message metadata (recipients, message ID)
+   - For each recipient in the email:
+     - Copies email from `incoming/<messageId>.eml` to `<recipient>/<messageId>.eml`
+   - Deletes original email from `incoming/` folder
+   - Logs execution to CloudWatch Logs (retained for 14 days)
+
+4. **Event Fan-out** (Optional downstream processing)
+   - S3 ObjectCreated event triggers SNS notification
+   - SNS publishes to SQS queue for downstream consumers
+   - Failed processing attempts (5 retries) move message to Dead Letter Queue
+
+5. **Monitoring & Observability**
+   - Lambda execution logs in CloudWatch Logs
+   - CloudWatch metrics for Lambda invocations, errors, duration
+   - SQS queue depth and DLQ messages indicate processing issues
+
+### Key Components
+
+| Component | Resource Name | Purpose |
+|-----------|---------------|---------|
+| **S3 Bucket** | `${bucket_name}` | Secure storage for email files (encrypted at rest with AES256) |
+| **SES Domain** | `${subdomain_fqdn}` | Verified domain identity for receiving email |
+| **SES Rule Set** | `${project_tag}-rule-set` | Active receipt rule set containing processing rules |
+| **SES Receipt Rule** | `${project_tag}-rule` | Defines S3 storage and Lambda invocation actions |
+| **Lambda Function** | `${project_tag}-move` | Organizes emails into recipient-specific folders |
+| **CloudWatch Logs** | `/aws/lambda/${project_tag}-move` | Lambda execution logs with configurable retention |
+| **SNS Topic** | `${project_tag}-topic` | Publishes S3 events for downstream processing |
+| **SQS Queue** | `${project_tag}-queue` | Main queue for event consumers |
+| **SQS DLQ** | `${project_tag}-dlq` | Dead letter queue for failed processing |
+
+### Security Features
+
+- **S3 Encryption**: Server-side encryption (AES256) for all stored emails
+- **S3 Versioning**: Enabled to protect against accidental deletions
+- **Public Access Blocking**: All public access to S3 bucket is blocked
+- **IAM Least Privilege**: Separate roles for SES and Lambda with minimal required permissions
+- **TLS Support**: Optional TLS for email transport (configurable to "Require")
+- **Virus Scanning**: SES automatic virus scanning enabled (`scan_enabled: true`)
+
+### Cost Considerations
+
+- **SES Receiving**: First 1,000 emails/month free, then $0.10 per 1,000 emails
+- **S3 Storage**: ~$0.023/GB/month (Standard storage class)
+- **Lambda Invocations**: First 1M requests/month free, then $0.20 per 1M
+- **Lambda Duration**: First 400,000 GB-seconds/month free
+- **CloudWatch Logs**: $0.50/GB ingested, $0.03/GB stored (14-day retention limits costs)
+- **SNS/SQS**: Minimal costs for low-to-moderate email volume
+
 ## Development
 
 ### Prerequisites

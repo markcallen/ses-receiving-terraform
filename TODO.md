@@ -6,7 +6,7 @@ This document tracks future improvements and enhancements for the SES Receiving 
 
 ### Documentation
 
-- [ ] **Add Architecture Diagram to README**
+- [x] **Add Architecture Diagram to README**
   - Add ASCII/text diagram showing: SES → S3 → SNS → SQS + Lambda
   - Include data flow explanation
 
@@ -37,7 +37,7 @@ This document tracks future improvements and enhancements for the SES Receiving 
 
 ### Infrastructure
 
-- [ ] **Add CloudWatch Log Group with Retention**
+- [x] **Add CloudWatch Log Group with Retention**
 
   ```hcl
   resource "aws_cloudwatch_log_group" "lambda_logs" {
@@ -47,7 +47,7 @@ This document tracks future improvements and enhancements for the SES Receiving 
   }
   ```
 
-- [ ] **Add More Outputs to outputs.tf**
+- [x] **Add More Outputs to outputs.tf**
   - Lambda function name (for easier CloudWatch access)
   - S3 bucket name (not just ARN)
   - CloudWatch log group path
@@ -56,29 +56,6 @@ This document tracks future improvements and enhancements for the SES Receiving 
 - [ ] **Add Tags to IAM Roles and Policies**
   - Currently only some resources have the Project tag
   - Add `tags = { Project = var.project_tag }` to all IAM roles
-
-### Configuration
-
-- [ ] **Create terraform.tfvars.example**
-
-  ```hcl
-  # Copy this file to terraform.tfvars and fill in your values
-  region         = "us-east-2"
-  subdomain_fqdn = "mail.example.com"
-  bucket_name    = "ses-inbound-example-com"
-  project_tag    = "ses-receive-example"
-  ```
-
-- [ ] **Create .gitignore**
-  ```
-  *.tfstate
-  *.tfstate.*
-  .terraform/
-  .terraform.lock.hcl
-  terraform.tfvars
-  lambda.zip
-  response.json
-  ```
 
 ## Medium Priority
 
