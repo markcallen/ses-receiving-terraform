@@ -138,6 +138,10 @@ resource "aws_ses_domain_dkim" "main" {
   domain = aws_ses_domain_identity.main.domain
 }
 
+resource "aws_ses_email_identity" "from_address" {
+  email = var.ses_from_address
+}
+
 resource "aws_ses_receipt_rule_set" "main" {
   rule_set_name = "${var.project_tag}-rule-set"
 }
@@ -291,4 +295,113 @@ resource "aws_ses_receipt_rule" "store_and_move" {
   depends_on = [
     aws_lambda_function.move_to_recipient_folder
   ]
+}
+
+# Convert user identifiers to ARNs and extract user names
+locals {
+  s3_access_user_arns = [
+    for user in var.s3_access_iam_users : (
+      startswith(user, "arn:aws:iam::") ? user : "arn:aws:iam::${data.aws_caller_identity.me.account_id}:user/${user}"
+    )
+  ]
+  iam_user_names = [
+    for user in var.s3_access_iam_users : (
+      startswith(user, "arn:aws:iam::") ? split("/", user)[length(split("/", user)) - 1] : user
+    )
+  ]
+}
+
+# IAM role for users to assume to access S3 bucket
+resource "aws_iam_role" "s3_access_role" {
+  name = "${var.project_tag}-s3-access-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = length(local.s3_access_user_arns) > 0 ? local.s3_access_user_arns : ["arn:aws:iam::${data.aws_caller_identity.me.account_id}:root"]
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "s3_access_role_policy" {
+  name = "${var.project_tag}-s3-access-policy"
+  role = aws_iam_role.s3_access_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.emails.arn,
+          "${aws_s3_bucket.emails.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# IAM policies attached to users to allow them to assume the role
+resource "aws_iam_user_policy" "s3_access_assume_role" {
+  for_each = toset(local.iam_user_names)
+  name     = "${var.project_tag}-assume-s3-access-role"
+  user     = each.value
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.s3_access_role.arn
+      }
+    ]
+  })
+}
+
+# IAM policies attached to groups to allow members to assume the role
+resource "aws_iam_group_policy" "s3_access_assume_role" {
+  for_each = toset(var.s3_access_iam_groups)
+  name     = "${var.project_tag}-assume-s3-access-role"
+  group    = each.value
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = aws_iam_role.s3_access_role.arn
+      }
+    ]
+  })
+}
+
+# IAM user for SES sending (e.g., magic link emails from lynkgo-app)
+resource "aws_iam_user" "ses_sending" {
+  name = "${var.project_tag}-ses-sending"
+  path = "/"
+  tags = local.common_tags
+}
+
+resource "aws_iam_user_policy" "ses_sending" {
+  name = "${var.project_tag}-ses-send-policy"
+  user = aws_iam_user.ses_sending.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = "*"
+      }
+    ]
+  })
 }

@@ -122,26 +122,44 @@ bucket_name    = "ses-inbound-app-markcallen-dev"
 project_tag    = "ses-receive-app-markcallen-dev"
 project        = "ses-inbound"
 environment    = "dev"
+
+# Optional: Grant IAM users/groups access to read emails from S3
+# s3_access_iam_users = ["arn:aws:iam::123456789012:user/test-user"]
+# s3_access_iam_groups = ["developers"]
 ```
 
 ## Inputs
 
-| Variable         | Description                                        | Default                          |
-| ---------------- | -------------------------------------------------- | -------------------------------- |
-| `region`         | AWS region that supports SES receiving             | `us-east-2`                      |
-| `subdomain_fqdn` | SES inbound subdomain (also used as the recipient) | `app.markcallen.dev`             |
-| `bucket_name`    | Name of the S3 bucket storing inbound messages     | `ses-inbound-app-markcallen-dev` |
-| `project_tag`    | Base tag applied to created resources              | `ses-receive-app-markcallen-dev` |
+| Variable                | Description                                                          | Default                          |
+| ----------------------- | -------------------------------------------------------------------- | -------------------------------- |
+| `region`                | AWS region that supports SES receiving                               | `us-east-2`                      |
+| `subdomain_fqdn`        | SES inbound subdomain (also used as the recipient)                  | `app.markcallen.dev`             |
+| `bucket_name`           | Name of the S3 bucket storing inbound messages                       | `ses-inbound-app-markcallen-dev` |
+| `project_tag`           | Base tag applied to created resources                               | `ses-receive-app-markcallen-dev` |
+| `project`               | Project name for resource labeling                                   | (required)                       |
+| `environment`           | Environment name (e.g., production, staging, dev)                     | (required)                       |
+| `log_retention_days`    | Number of days to retain Lambda CloudWatch logs (0 = never expire)  | `14`                             |
+| `s3_access_iam_users`   | List of IAM user ARNs or names that can assume the S3 access role   | `[]`                             |
+| `s3_access_iam_groups`  | List of IAM group names that can assume the S3 access role          | `[]`                             |
+| `ses_from_address`      | Sender (From) address for outbound emails (e.g., magic links)       | (required)                       |
 
 ## Outputs
 
-| Output          | Description                        |
-| --------------- | ---------------------------------- |
-| `mx_record`     | MX record value to publish         |
-| `s3_bucket_arn` | ARN of the inbound email bucket    |
-| `sns_topic_arn` | ARN of the SNS topic for S3 events |
-| `sqs_queue_url` | URL of the primary SQS queue       |
-| `ses_rule_arn`  | ARN of the SES receipt rule        |
+| Output                  | Description                                          |
+| ----------------------- | ---------------------------------------------------- |
+| `mx_record`             | MX record value to publish                           |
+| `s3_bucket_arn`         | ARN of the inbound email bucket                      |
+| `s3_bucket_name`        | Name of the S3 bucket                                |
+| `s3_access_role_arn`    | ARN of the IAM role for S3 bucket access              |
+| `sns_topic_arn`         | ARN of the SNS topic for S3 events                  |
+| `sqs_queue_url`         | URL of the primary SQS queue                         |
+| `ses_rule_arn`          | ARN of the SES receipt rule                          |
+| `subdomain_fqdn`        | The subdomain configured for SES receiving           |
+| `lambda_function_name`  | Name of the Lambda function that organizes emails     |
+| `assume_role_command`   | AWS CLI command to assume the S3 access role        |
+| `ses_from_address`      | Configured sender address for outbound emails        |
+| `ses_sending_user_arn`  | ARN of IAM user for SES sending                      |
+| `ses_sending_user_name` | IAM user name (create access keys in AWS Console)    |
 
 ## Lambda Behavior
 
@@ -392,6 +410,36 @@ When modifying Terraform configuration files:
 4. Monitor logs for errors:
    ```bash
    aws logs tail /aws/lambda/$(terraform output -raw lambda_function_name) --follow
+   ```
+
+## Reading Emails from S3
+
+For E2E testing or programmatic email access, use the separate [`ses-email-client`](https://github.com/everydaydevops/ses-email-client) npm package.
+
+### Quick Start
+
+1. **Get the role ARN and bucket name from Terraform outputs:**
+   ```bash
+   terraform output -raw s3_access_role_arn
+   terraform output -raw s3_bucket_name
+   ```
+
+2. **Install the email client in your project:**
+   ```bash
+   npm install @ses-receiving/email-client
+   ```
+
+3. **Use in your E2E tests:**
+   ```typescript
+   import { SESEmailClient } from '@ses-receiving/email-client';
+
+   const client = new SESEmailClient({
+     bucketName: process.env.SES_BUCKET_NAME!,
+     roleArn: process.env.SES_S3_ACCESS_ROLE_ARN,
+     region: 'us-east-1'
+   });
+
+   const email = await client.waitForLatestEmail('test@your-subdomain.com', 30000);
    ```
 
 ## Cleanup

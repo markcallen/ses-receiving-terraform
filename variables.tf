@@ -44,3 +44,20 @@ variable "log_retention_days" {
     error_message = "Log retention days must be a valid CloudWatch Logs retention value: 0 (never expire), 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, or 3653."
   }
 }
+
+variable "s3_access_iam_users" {
+  description = "List of IAM user ARNs or user names that should be granted access to assume the S3 bucket access role"
+  type        = list(string)
+  default     = []
+}
+
+variable "s3_access_iam_groups" {
+  description = "List of IAM group names that should be granted access to assume the S3 bucket access role (policies will be attached to these groups)"
+  type        = list(string)
+  default     = []
+}
+
+variable "ses_from_address" {
+  description = "Email address to use as the sender (From) for outbound emails. Must be from a verified SES domain (e.g., no-reply@mail.example.com). The subdomain_fqdn is verified for both receiving and sending."
+  type        = string
+}

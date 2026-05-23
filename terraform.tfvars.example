@@ -23,3 +23,17 @@ project = "ses-inbound"
 
 # Environment name
 environment = "production"
+
+# Optional: IAM users that should be granted access to read emails from S3
+# Can be IAM user ARNs or user names
+# Example: ["arn:aws:iam::123456789012:user/test-user"] or ["test-user"]
+# s3_access_iam_users = []
+
+# Optional: IAM groups that should be granted access to read emails from S3
+# Group members will be able to assume the S3 access role
+# Example: ["developers", "qa-team"]
+# s3_access_iam_groups = []
+
+# Sender (From) address for outbound emails (e.g., magic links). Must be from the verified domain.
+# The subdomain_fqdn is verified for both receiving and sending.
+ses_from_address = "no-reply@mail.example.com"

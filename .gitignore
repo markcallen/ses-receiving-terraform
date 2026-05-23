@@ -19,6 +19,7 @@ response.json
 .DS_Store
 
 # Editor files
+.cursor/mcp.json
 *.swp
 *.swo
 *~

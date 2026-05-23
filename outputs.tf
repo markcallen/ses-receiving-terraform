@@ -81,3 +81,28 @@ output "rule_set_activation_command" {
   description = "AWS CLI command to manually activate the SES receipt rule set if needed"
   value       = "aws ses set-active-receipt-rule-set --rule-set-name ${aws_ses_receipt_rule_set.main.rule_set_name}"
 }
+
+output "s3_access_role_arn" {
+  description = "ARN of the IAM role that users can assume to access the S3 bucket"
+  value       = aws_iam_role.s3_access_role.arn
+}
+
+output "assume_role_command" {
+  description = "AWS CLI command to assume the S3 access role (replace USER_ARN with your IAM user ARN)"
+  value       = "aws sts assume-role --role-arn ${aws_iam_role.s3_access_role.arn} --role-session-name ses-email-reader"
+}
+
+output "ses_from_address" {
+  description = "Configured sender (From) address for outbound emails"
+  value       = var.ses_from_address
+}
+
+output "ses_sending_user_arn" {
+  description = "ARN of the IAM user for SES sending. Create access keys in AWS Console for this user to use with lynkgo-app."
+  value       = aws_iam_user.ses_sending.arn
+}
+
+output "ses_sending_user_name" {
+  description = "IAM user name for SES sending (use when creating access keys in AWS Console)"
+  value       = aws_iam_user.ses_sending.name
+}
