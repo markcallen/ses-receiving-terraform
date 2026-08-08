@@ -34,6 +34,31 @@ environment = "production"
 # Example: ["developers", "qa-team"]
 # s3_access_iam_groups = []
 
-# Sender (From) address for outbound emails (e.g., magic links). Must be from the verified domain.
-# The subdomain_fqdn is verified for both receiving and sending.
-ses_from_address = "no-reply@mail.example.com"
+# Optional: safer module default is to create the SES receipt rule set but not
+# automatically activate it. Set true only when this stack should own the
+# active SES receipt rule set for this account and region.
+# activate_receipt_rule_set = true
+
+# Optional: operational tuning and retention.
+# lambda_timeout_seconds = 30
+# sqs_message_retention_seconds = 1209600
+# sqs_visibility_timeout_seconds = 60
+# email_retention_days = 30
+# enable_bucket_versioning = true
+
+# Optional: use a customer-managed KMS key instead of SSE-S3.
+# s3_kms_key_arn = "arn:aws:kms:us-east-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+
+# Optional: create CloudWatch alarms for Lambda errors and DLQ messages.
+# enable_cloudwatch_alarms = true
+# alarm_actions = ["arn:aws:sns:us-east-2:123456789012:alerts"]
+# ok_actions = ["arn:aws:sns:us-east-2:123456789012:alerts"]
+
+# Optional: IAM principal ARNs, such as a CI or Playwright runner role, trusted
+# to assume the S3 access role.
+# trusted_reader_principal_arns = ["arn:aws:iam::123456789012:role/playwright-tests"]
+
+# Optional outbound sending user. Receiving and the email client do not require this.
+# create_ses_sending_user = true
+# ses_from_address = "no-reply@mail.example.com"
+# ses_sending_identity_arns = ["arn:aws:ses:us-east-2:123456789012:identity/no-reply@mail.example.com"]

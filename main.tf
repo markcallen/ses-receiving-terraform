@@ -12,15 +12,19 @@ terraform {
   }
 }
 
-provider "aws" {
-  region = var.region
-}
-
 locals {
   common_tags = {
     Project     = var.project
     Environment = var.environment
   }
+
+  receipt_rule_set_name = var.create_receipt_rule_set ? aws_ses_receipt_rule_set.main[0].rule_set_name : coalesce(var.receipt_rule_set_name, "")
+  s3_sse_algorithm      = var.s3_kms_key_arn == null ? "AES256" : "aws:kms"
+  ses_sending_identity_arns = (
+    length(var.ses_sending_identity_arns) > 0
+    ? var.ses_sending_identity_arns
+    : ["arn:aws:ses:${var.region}:${data.aws_caller_identity.me.account_id}:identity/${var.ses_from_address != null ? var.ses_from_address : "*"}"]
+  )
 }
 
 resource "aws_s3_bucket" "emails" {
@@ -38,14 +42,36 @@ resource "aws_s3_bucket_public_access_block" "emails" {
 
 resource "aws_s3_bucket_versioning" "emails" {
   bucket = aws_s3_bucket.emails.id
-  versioning_configuration { status = "Enabled" }
+  versioning_configuration { status = var.enable_bucket_versioning ? "Enabled" : "Suspended" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      kms_master_key_id = var.s3_kms_key_arn
+      sse_algorithm     = local.s3_sse_algorithm
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "emails" {
+  count = var.email_retention_days > 0 ? 1 : 0
+
+  bucket = aws_s3_bucket.emails.id
+
+  rule {
+    id     = "expire-emails"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = var.email_retention_days
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.email_retention_days
     }
   }
 }
@@ -57,15 +83,15 @@ resource "aws_sns_topic" "s3_events" {
 
 resource "aws_sqs_queue" "dlq" {
   name                       = "${var.project_tag}-dlq"
-  message_retention_seconds  = 1209600
-  visibility_timeout_seconds = 60
+  message_retention_seconds  = var.sqs_message_retention_seconds
+  visibility_timeout_seconds = var.sqs_visibility_timeout_seconds
   tags                       = local.common_tags
 }
 
 resource "aws_sqs_queue" "events_queue" {
   name                       = "${var.project_tag}-queue"
-  visibility_timeout_seconds = 60
-  message_retention_seconds  = 1209600
+  visibility_timeout_seconds = var.sqs_visibility_timeout_seconds
+  message_retention_seconds  = var.sqs_message_retention_seconds
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq.arn
     maxReceiveCount     = 5
@@ -139,15 +165,28 @@ resource "aws_ses_domain_dkim" "main" {
 }
 
 resource "aws_ses_email_identity" "from_address" {
+  count = var.create_ses_sending_user ? 1 : 0
+
   email = var.ses_from_address
+
+  lifecycle {
+    precondition {
+      condition     = var.ses_from_address != null
+      error_message = "Set ses_from_address when create_ses_sending_user is true."
+    }
+  }
 }
 
 resource "aws_ses_receipt_rule_set" "main" {
+  count = var.create_receipt_rule_set ? 1 : 0
+
   rule_set_name = "${var.project_tag}-rule-set"
 }
 
 resource "aws_ses_active_receipt_rule_set" "main" {
-  rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
+  count = var.activate_receipt_rule_set ? 1 : 0
+
+  rule_set_name = local.receipt_rule_set_name
 }
 
 resource "aws_iam_role" "ses_s3_role" {
@@ -233,7 +272,7 @@ resource "aws_iam_role_policy" "lambda_s3_rw" {
     Version = "2012-10-17",
     Statement = [{
       Effect   = "Allow",
-      Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:CopyObject"],
+      Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       Resource = ["${aws_s3_bucket.emails.arn}/*"]
     }]
   })
@@ -252,7 +291,7 @@ resource "aws_lambda_function" "move_to_recipient_folder" {
   runtime          = "python3.12"
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  timeout          = 30
+  timeout          = var.lambda_timeout_seconds
   environment {
     variables = {
       BUCKET = aws_s3_bucket.emails.bucket
@@ -261,6 +300,52 @@ resource "aws_lambda_function" "move_to_recipient_folder" {
   }
   tags       = local.common_tags
   depends_on = [aws_cloudwatch_log_group.lambda_logs]
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  count = var.enable_cloudwatch_alarms ? 1 : 0
+
+  alarm_name          = "${var.project_tag}-lambda-errors"
+  alarm_description   = "Lambda errors for SES inbound email organizer"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+
+  dimensions = {
+    FunctionName = aws_lambda_function.move_to_recipient_folder.function_name
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
+  count = var.enable_cloudwatch_alarms ? 1 : 0
+
+  alarm_name          = "${var.project_tag}-dlq-messages"
+  alarm_description   = "Messages visible in the SES inbound email DLQ"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+
+  dimensions = {
+    QueueName = aws_sqs_queue.dlq.name
+  }
+
+  tags = local.common_tags
 }
 
 resource "aws_lambda_permission" "allow_ses" {
@@ -273,11 +358,11 @@ resource "aws_lambda_permission" "allow_ses" {
 
 resource "aws_ses_receipt_rule" "store_and_move" {
   name          = "${var.project_tag}-rule"
-  rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
+  rule_set_name = local.receipt_rule_set_name
   enabled       = true
   scan_enabled  = true
   recipients    = [var.subdomain_fqdn]
-  tls_policy    = "Optional"
+  tls_policy    = var.tls_policy
 
   s3_action {
     bucket_name       = aws_s3_bucket.emails.bucket
@@ -293,8 +378,17 @@ resource "aws_ses_receipt_rule" "store_and_move" {
   }
 
   depends_on = [
-    aws_lambda_function.move_to_recipient_folder
+    aws_iam_role_policy.ses_s3_role_policy,
+    aws_lambda_function.move_to_recipient_folder,
+    aws_lambda_permission.allow_ses
   ]
+
+  lifecycle {
+    precondition {
+      condition     = local.receipt_rule_set_name != ""
+      error_message = "Set create_receipt_rule_set = true or provide receipt_rule_set_name."
+    }
+  }
 }
 
 # Convert user identifiers to ARNs and extract user names
@@ -309,6 +403,12 @@ locals {
       startswith(user, "arn:aws:iam::") ? split("/", user)[length(split("/", user)) - 1] : user
     )
   ]
+  s3_access_trusted_principal_arns = distinct(concat(var.trusted_reader_principal_arns, local.s3_access_user_arns))
+  s3_access_role_trust_principals = (
+    length(var.s3_access_iam_groups) > 0 || length(local.s3_access_trusted_principal_arns) == 0
+    ? ["arn:aws:iam::${data.aws_caller_identity.me.account_id}:root"]
+    : local.s3_access_trusted_principal_arns
+  )
 }
 
 # IAM role for users to assume to access S3 bucket
@@ -320,7 +420,7 @@ resource "aws_iam_role" "s3_access_role" {
       {
         Effect = "Allow"
         Principal = {
-          AWS = length(local.s3_access_user_arns) > 0 ? local.s3_access_user_arns : ["arn:aws:iam::${data.aws_caller_identity.me.account_id}:root"]
+          AWS = local.s3_access_role_trust_principals
         }
         Action = "sts:AssumeRole"
       }
@@ -386,21 +486,25 @@ resource "aws_iam_group_policy" "s3_access_assume_role" {
 
 # IAM user for SES sending (e.g., magic link emails from lynkgo-app)
 resource "aws_iam_user" "ses_sending" {
+  count = var.create_ses_sending_user ? 1 : 0
+
   name = "${var.project_tag}-ses-sending"
   path = "/"
   tags = local.common_tags
 }
 
 resource "aws_iam_user_policy" "ses_sending" {
+  count = var.create_ses_sending_user ? 1 : 0
+
   name = "${var.project_tag}-ses-send-policy"
-  user = aws_iam_user.ses_sending.name
+  user = aws_iam_user.ses_sending[0].name
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect   = "Allow"
         Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource = "*"
+        Resource = local.ses_sending_identity_arns
       }
     ]
   })

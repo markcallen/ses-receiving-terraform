@@ -2,6 +2,11 @@ output "mx_record" {
   value = "10 inbound-smtp.${var.region}.amazonaws.com"
 }
 
+output "region" {
+  description = "AWS region used for SES receiving DNS output"
+  value       = var.region
+}
+
 output "s3_bucket_arn" {
   value = aws_s3_bucket.emails.arn
 }
@@ -32,7 +37,7 @@ output "lambda_function_name" {
 
 output "ses_receipt_rule_set_name" {
   description = "Name of the SES receipt rule set (use this to activate the rule set)"
-  value       = aws_ses_receipt_rule_set.main.rule_set_name
+  value       = local.receipt_rule_set_name
 }
 
 output "ses_verification_token" {
@@ -77,9 +82,19 @@ output "cloudwatch_log_group_name" {
   value       = aws_cloudwatch_log_group.lambda_logs.name
 }
 
+output "lambda_errors_alarm_name" {
+  description = "CloudWatch alarm name for Lambda errors when alarms are enabled"
+  value       = var.enable_cloudwatch_alarms ? aws_cloudwatch_metric_alarm.lambda_errors[0].alarm_name : null
+}
+
+output "dlq_messages_alarm_name" {
+  description = "CloudWatch alarm name for DLQ messages when alarms are enabled"
+  value       = var.enable_cloudwatch_alarms ? aws_cloudwatch_metric_alarm.dlq_messages[0].alarm_name : null
+}
+
 output "rule_set_activation_command" {
   description = "AWS CLI command to manually activate the SES receipt rule set if needed"
-  value       = "aws ses set-active-receipt-rule-set --rule-set-name ${aws_ses_receipt_rule_set.main.rule_set_name}"
+  value       = local.receipt_rule_set_name == "" ? null : "aws ses set-active-receipt-rule-set --rule-set-name ${local.receipt_rule_set_name}"
 }
 
 output "s3_access_role_arn" {
@@ -99,10 +114,10 @@ output "ses_from_address" {
 
 output "ses_sending_user_arn" {
   description = "ARN of the IAM user for SES sending. Create access keys in AWS Console for this user to use with lynkgo-app."
-  value       = aws_iam_user.ses_sending.arn
+  value       = var.create_ses_sending_user ? aws_iam_user.ses_sending[0].arn : null
 }
 
 output "ses_sending_user_name" {
   description = "IAM user name for SES sending (use when creating access keys in AWS Console)"
-  value       = aws_iam_user.ses_sending.name
+  value       = var.create_ses_sending_user ? aws_iam_user.ses_sending[0].name : null
 }

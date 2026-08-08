@@ -1,6 +1,6 @@
 # SES Receiving Terraform
 
-This Terraform configuration stands up an AWS SES inbound email pipeline: incoming messages for a subdomain are accepted by SES, written to an encrypted S3 bucket, optionally fanned out via SNS/SQS, and finally organized per-recipient by a Lambda function.
+This Terraform module stands up an AWS SES inbound email pipeline: incoming messages for a subdomain are accepted by SES, written to an encrypted S3 bucket, optionally fanned out via SNS/SQS, and finally organized per-recipient by a Lambda function.
 
 ## What It Provisions
 
@@ -19,17 +19,55 @@ This Terraform configuration stands up an AWS SES inbound email pipeline: incomi
 
 ## Usage
 
+### Existing Terraform Project
+
+Add the module to your existing Terraform project and pass in the AWS provider that should own SES receiving resources:
+
+```hcl
+provider "aws" {
+  alias  = "ses_receiving"
+  region = "us-east-2"
+}
+
+module "ses_receiving" {
+  source = "git::ssh://git@github.com/your-org/ses-receiving-terraform.git?ref=v0.1.0"
+
+  providers = {
+    aws = aws.ses_receiving
+  }
+
+  region         = "us-east-2"
+  subdomain_fqdn = "mail.example.com"
+  bucket_name    = "example-mail-inbound-prod"
+  project_tag    = "example-mail-prod"
+  project        = "example"
+  environment    = "prod"
+
+  create_receipt_rule_set   = true
+  activate_receipt_rule_set = false
+
+  trusted_reader_principal_arns = [
+    aws_iam_role.playwright_tests.arn
+  ]
+}
+```
+
+If you already have an SES receipt rule set, use it instead:
+
+```hcl
+create_receipt_rule_set = false
+receipt_rule_set_name   = "existing-rule-set"
+```
+
+Only set `activate_receipt_rule_set = true` if this stack should own the active SES receipt rule set for the account and region.
+
+See `examples/existing-project` for a complete minimal caller.
+
+### Standalone Testing
+
 1. Ensure your AWS credentials are configured (e.g., via `aws configure` or environment variables).
-2. Copy `terraform.tfvars.example` to `terraform.tfvars` and fill in your values:
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   ```
-   Then edit `terraform.tfvars` with your specific configuration. The file is git-ignored and will not be committed.
-3. Initialize and deploy:
-   ```bash
-   terraform init
-   terraform apply
-   ```
+2. Copy `terraform.tfvars.example` to `terraform.tfvars` and fill in your values.
+3. Run `terraform init` and `terraform apply`.
 
 4. **Configure DNS records** - After the initial deployment, retrieve the required DNS records:
    ```bash
@@ -53,7 +91,7 @@ This Terraform configuration stands up an AWS SES inbound email pipeline: incomi
 
    Wait until the verification status shows `"Success"`. This usually takes a few minutes after DNS propagation.
 
-7. **Verify the SES receipt rule set is active** (automatically activated by Terraform):
+7. **Verify the SES receipt rule set is active**. If `activate_receipt_rule_set = false`, activate it from the stack that owns SES receiving or run the output command manually:
    ```bash
    aws ses describe-active-receipt-rule-set
    ```
@@ -139,15 +177,32 @@ environment    = "dev"
 | `project`               | Project name for resource labeling                                   | (required)                       |
 | `environment`           | Environment name (e.g., production, staging, dev)                     | (required)                       |
 | `log_retention_days`    | Number of days to retain Lambda CloudWatch logs (0 = never expire)  | `14`                             |
+| `lambda_timeout_seconds` | Lambda timeout for organizing received messages                      | `30`                             |
+| `sqs_message_retention_seconds` | SQS message retention seconds                                | `1209600`                        |
+| `sqs_visibility_timeout_seconds` | SQS visibility timeout seconds                              | `60`                             |
+| `enable_bucket_versioning` | Whether to enable S3 bucket versioning                             | `true`                           |
+| `email_retention_days`  | Days to retain email objects in S3 (0 = indefinitely)                 | `0`                              |
+| `s3_kms_key_arn`        | Optional KMS key ARN for S3 encryption                                | `null`                           |
+| `enable_cloudwatch_alarms` | Whether to create Lambda error and DLQ depth alarms                | `false`                          |
+| `alarm_actions`         | Alarm action ARNs for CloudWatch alarms                               | `[]`                             |
+| `ok_actions`            | OK action ARNs for CloudWatch alarms                                  | `[]`                             |
 | `s3_access_iam_users`   | List of IAM user ARNs or names that can assume the S3 access role   | `[]`                             |
 | `s3_access_iam_groups`  | List of IAM group names that can assume the S3 access role          | `[]`                             |
-| `ses_from_address`      | Sender (From) address for outbound emails (e.g., magic links)       | (required)                       |
+| `trusted_reader_principal_arns` | IAM principal ARNs trusted to assume the S3 read role       | `[]`                             |
+| `create_receipt_rule_set` | Whether to create a new SES receipt rule set                       | `true`                           |
+| `receipt_rule_set_name` | Existing SES receipt rule set name                                  | `null`                           |
+| `activate_receipt_rule_set` | Whether to make this rule set active                             | `false`                          |
+| `tls_policy`            | SES receipt rule TLS policy                                          | `Optional`                       |
+| `create_ses_sending_user` | Whether to create an outbound SES IAM user                        | `false`                          |
+| `ses_from_address`      | Sender identity to verify when outbound user creation is enabled    | `null`                           |
+| `ses_sending_identity_arns` | SES identity ARNs the optional sending user can use              | `[]`                             |
 
 ## Outputs
 
 | Output                  | Description                                          |
 | ----------------------- | ---------------------------------------------------- |
 | `mx_record`             | MX record value to publish                           |
+| `region`                | AWS region used for SES receiving                    |
 | `s3_bucket_arn`         | ARN of the inbound email bucket                      |
 | `s3_bucket_name`        | Name of the S3 bucket                                |
 | `s3_access_role_arn`    | ARN of the IAM role for S3 bucket access              |
@@ -156,6 +211,8 @@ environment    = "dev"
 | `ses_rule_arn`          | ARN of the SES receipt rule                          |
 | `subdomain_fqdn`        | The subdomain configured for SES receiving           |
 | `lambda_function_name`  | Name of the Lambda function that organizes emails     |
+| `lambda_errors_alarm_name` | CloudWatch alarm name for Lambda errors             |
+| `dlq_messages_alarm_name` | CloudWatch alarm name for DLQ messages               |
 | `assume_role_command`   | AWS CLI command to assume the S3 access role        |
 | `ses_from_address`      | Configured sender address for outbound emails        |
 | `ses_sending_user_arn`  | ARN of IAM user for SES sending                      |
