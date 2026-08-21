@@ -20,10 +20,20 @@ locals {
 
   receipt_rule_set_name = var.create_receipt_rule_set ? aws_ses_receipt_rule_set.main[0].rule_set_name : var.receipt_rule_set_name
   s3_sse_algorithm      = var.s3_kms_key_arn == null ? "AES256" : "aws:kms"
+  receipt_rule_set_name_for_resource = (
+    local.receipt_rule_set_name == null || trimspace(local.receipt_rule_set_name) == ""
+    ? "invalid-receipt-rule-set-name"
+    : local.receipt_rule_set_name
+  )
+  ses_from_address_for_resource = (
+    var.ses_from_address == null || trimspace(var.ses_from_address) == ""
+    ? "invalid@example.com"
+    : var.ses_from_address
+  )
   ses_sending_identity_arns = (
     length(var.ses_sending_identity_arns) > 0
     ? var.ses_sending_identity_arns
-    : ["arn:aws:ses:${var.region}:${data.aws_caller_identity.me.account_id}:identity/${var.ses_from_address != null ? var.ses_from_address : "*"}"]
+    : ["arn:aws:ses:${var.region}:${data.aws_caller_identity.me.account_id}:identity/${local.ses_from_address_for_resource}"]
   )
 }
 
@@ -167,7 +177,7 @@ resource "aws_ses_domain_dkim" "main" {
 resource "aws_ses_email_identity" "from_address" {
   count = var.create_ses_sending_user ? 1 : 0
 
-  email = var.ses_from_address
+  email = local.ses_from_address_for_resource
 
   lifecycle {
     precondition {
@@ -186,7 +196,7 @@ resource "aws_ses_receipt_rule_set" "main" {
 resource "aws_ses_active_receipt_rule_set" "main" {
   count = var.activate_receipt_rule_set ? 1 : 0
 
-  rule_set_name = local.receipt_rule_set_name
+  rule_set_name = local.receipt_rule_set_name_for_resource
 
   lifecycle {
     precondition {
@@ -365,7 +375,7 @@ resource "aws_lambda_permission" "allow_ses" {
 
 resource "aws_ses_receipt_rule" "store_and_move" {
   name          = "${var.project_tag}-rule"
-  rule_set_name = local.receipt_rule_set_name
+  rule_set_name = local.receipt_rule_set_name_for_resource
   enabled       = true
   scan_enabled  = true
   recipients    = [var.subdomain_fqdn]

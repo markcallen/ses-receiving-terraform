@@ -99,6 +99,11 @@ variable "s3_kms_key_arn" {
   description = "Optional KMS key ARN for S3 server-side encryption. When null, SSE-S3 AES256 is used."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.s3_kms_key_arn == null ? true : trimspace(var.s3_kms_key_arn) != ""
+    error_message = "s3_kms_key_arn must be null or a non-empty string."
+  }
 }
 
 variable "enable_cloudwatch_alarms" {
