@@ -54,7 +54,7 @@ def handler(event, context):
 
     except KeyError as e:
         logger.error(f"Missing required field in event: {str(e)}")
-        return {"ok": False, "error": f"Missing field: {str(e)}"}
+        raise
     except Exception as e:
         logger.error(f"Unexpected error processing message: {str(e)}")
-        return {"ok": False, "error": str(e)}
+        raise
