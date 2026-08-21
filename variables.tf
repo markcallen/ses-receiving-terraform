@@ -1,5 +1,5 @@
 variable "region" {
-  description = "AWS region that supports SES Receiving. Used for DNS output only; configure the AWS provider in the calling project."
+  description = "AWS region that supports SES Receiving. Configure the AWS provider in the calling project; this value is also used for DNS output and optional SES sending identity ARNs."
   type        = string
   default     = "us-east-2"
 }
@@ -147,6 +147,11 @@ variable "receipt_rule_set_name" {
   description = "Existing SES receipt rule set name to add the receipt rule to when create_receipt_rule_set is false."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.receipt_rule_set_name == null ? true : trimspace(var.receipt_rule_set_name) != ""
+    error_message = "receipt_rule_set_name must be null or a non-empty string."
+  }
 }
 
 variable "activate_receipt_rule_set" {
@@ -176,6 +181,11 @@ variable "ses_from_address" {
   description = "Email address to verify for outbound email when create_ses_sending_user is true."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.ses_from_address == null ? true : trimspace(var.ses_from_address) != ""
+    error_message = "ses_from_address must be null or a non-empty string."
+  }
 }
 
 variable "ses_sending_identity_arns" {

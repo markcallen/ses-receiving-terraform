@@ -94,7 +94,7 @@ output "dlq_messages_alarm_name" {
 
 output "rule_set_activation_command" {
   description = "AWS CLI command to manually activate the SES receipt rule set if needed"
-  value       = local.receipt_rule_set_name == "" ? null : "aws ses set-active-receipt-rule-set --rule-set-name ${local.receipt_rule_set_name}"
+  value       = local.receipt_rule_set_name == null ? null : "aws ses set-active-receipt-rule-set --rule-set-name ${local.receipt_rule_set_name}"
 }
 
 output "s3_access_role_arn" {

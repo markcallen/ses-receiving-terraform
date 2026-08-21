@@ -18,7 +18,7 @@ locals {
     Environment = var.environment
   }
 
-  receipt_rule_set_name = var.create_receipt_rule_set ? aws_ses_receipt_rule_set.main[0].rule_set_name : coalesce(var.receipt_rule_set_name, "")
+  receipt_rule_set_name = var.create_receipt_rule_set ? aws_ses_receipt_rule_set.main[0].rule_set_name : var.receipt_rule_set_name
   s3_sse_algorithm      = var.s3_kms_key_arn == null ? "AES256" : "aws:kms"
   ses_sending_identity_arns = (
     length(var.ses_sending_identity_arns) > 0
@@ -171,7 +171,7 @@ resource "aws_ses_email_identity" "from_address" {
 
   lifecycle {
     precondition {
-      condition     = var.ses_from_address != null
+      condition     = var.ses_from_address == null ? false : trimspace(var.ses_from_address) != ""
       error_message = "Set ses_from_address when create_ses_sending_user is true."
     }
   }
@@ -187,6 +187,13 @@ resource "aws_ses_active_receipt_rule_set" "main" {
   count = var.activate_receipt_rule_set ? 1 : 0
 
   rule_set_name = local.receipt_rule_set_name
+
+  lifecycle {
+    precondition {
+      condition     = local.receipt_rule_set_name == null ? false : trimspace(local.receipt_rule_set_name) != ""
+      error_message = "Set create_receipt_rule_set = true or provide receipt_rule_set_name before activating a receipt rule set."
+    }
+  }
 }
 
 resource "aws_iam_role" "ses_s3_role" {
@@ -385,7 +392,7 @@ resource "aws_ses_receipt_rule" "store_and_move" {
 
   lifecycle {
     precondition {
-      condition     = local.receipt_rule_set_name != ""
+      condition     = local.receipt_rule_set_name == null ? false : trimspace(local.receipt_rule_set_name) != ""
       error_message = "Set create_receipt_rule_set = true or provide receipt_rule_set_name."
     }
   }
